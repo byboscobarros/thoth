@@ -1,8 +1,8 @@
 # Thoth
 
-Runtime/harness para agentes autonomos.
+Runtime/harness for autonomous agents.
 
-## Requisitos
+## Requirements
 - Python 3.12+
 - uv
 
@@ -11,50 +11,50 @@ Runtime/harness para agentes autonomos.
 uv sync --dev
 ```
 
-## Executar
+## Run
 ```bash
 uv run thoth
 ```
 
-## Arquivo .env (carregamento automatico)
-No startup, o runtime tenta carregar um arquivo `.env` no diretorio atual.
+## .env File (Automatic Loading)
+At startup, the runtime tries to load a `.env` file from the current directory.
 
-Regras:
-- variaveis ja definidas no ambiente nao sao sobrescritas pelo `.env`.
-- caminho customizado pode ser definido com `THOTH_DOTENV_PATH`.
+Rules:
+- variables already defined in the environment are not overridden by `.env`.
+- a custom path can be defined with `THOTH_DOTENV_PATH`.
 
-Exemplo:
+Example:
 ```bash
 cp .env.example .env
-uv run thoth --message "ola"
+uv run thoth --message "hello"
 ```
 
-## Usar provider OpenRouter
-O runtime carrega providers por manifesto automaticamente, incluindo `mock` e `openrouter`.
+## Use the OpenRouter Provider
+The runtime automatically loads providers from manifests, including `mock` and `openrouter`.
 
-Para forcar o uso do OpenRouter na selecao de provider:
+To force OpenRouter in provider selection:
 ```bash
 THOTH_PREFERRED_PROVIDER=openrouter \
-THOTH_OPENROUTER_API_KEY=<sua_chave> \
+THOTH_OPENROUTER_API_KEY=<your_key> \
 THOTH_OPENROUTER_MODEL=openai/gpt-5.2 \
-uv run thoth --message "ola"
+uv run thoth --message "hello"
 ```
 
-Variaveis opcionais:
+Optional variables:
 - `THOTH_OPENROUTER_BASE_URL` (default: `https://openrouter.ai/api/v1`)
 - `THOTH_OPENROUTER_HTTP_REFERER`
 - `THOTH_OPENROUTER_TITLE`
 - `THOTH_OPENROUTER_TIMEOUT_SECONDS` (default: `60`)
 
-## Sessao Persistente (Opcional)
-Por padrao, o runtime usa store em memoria (reinicia a sessao a cada processo).
+## Persistent Session (Optional)
+By default, the runtime uses an in-memory store (session resets every process run).
 
-Para persistir sessao em arquivos JSON:
+To persist sessions in JSON files:
 ```bash
 THOTH_SESSION_STORE=file THOTH_SESSION_DIR=.thoth/sessions uv run thoth --message "ping" --session-id "sess_cli"
 ```
 
-## Testes
+## Tests
 ```bash
 uv run pytest
 ```
