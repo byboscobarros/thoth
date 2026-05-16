@@ -1,0 +1,18 @@
+{
+  "schema_version": "v1",
+  "type": "provider",
+  "name": "openrouter",
+  "version": "0.1.0",
+  "entrypoint": "thoth.providers.openrouter.provider:OpenRouterProvider",
+  "capabilities": {
+    "chat_completion": true,
+    "streaming": true,
+    "tool_calling": false
+  },
+  "compatibility": {
+    "runtime": ">=0.1.0"
+  },
+  "metadata": {
+    "description": "OpenRouter provider using Chat Completions API"
+  }
+}
