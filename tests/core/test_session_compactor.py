@@ -2,6 +2,28 @@ from datetime import UTC, datetime
 
 from thoth.core.session_compactor import SessionCompactionConfig, SessionCompactor
 from thoth.domain.session import SessionState
+from thoth.domain.session_compaction import SessionSummary
+
+
+class FixedSummarizer:
+    def summarize(
+        self,
+        *,
+        previous_summary: SessionSummary,
+        compacted_history: list[dict[str, str]],
+        max_summary_chars: int,
+    ) -> SessionSummary:
+        _ = previous_summary, compacted_history, max_summary_chars
+        return SessionSummary(
+            version=1,
+            short="fixed-summary",
+            structured={
+                "facts": ["fixed-fact"],
+                "goals": [],
+                "decisions": [],
+                "open_tasks": [],
+            },
+        )
 
 
 def _history(size: int) -> list[dict[str, str]]:
@@ -121,3 +143,81 @@ def test_compactor_plan_reports_start_event_payload() -> None:
         "messages_before": 10,
         "messages_compactable": 6,
     }
+
+
+def test_compactor_uses_injected_summarizer() -> None:
+    compactor = SessionCompactor(
+        config=SessionCompactionConfig(
+            active_window=4,
+            compaction_threshold=2,
+            max_summary_chars=300,
+        ),
+        summarizer=FixedSummarizer(),
+    )
+    state = SessionState.create("sess_custom", data={"message_history": _history(10)})
+
+    result = compactor.compact_if_needed(state=state, request_id="req_custom")
+
+    assert result.compacted is True
+    assert result.state.data["session_summary"]["short"] == "fixed-summary"
+    assert result.state.data["session_summary"]["structured"]["facts"] == ["fixed-fact"]
+
+
+def test_compactor_can_trigger_by_estimated_tokens() -> None:
+    compactor = SessionCompactor(
+        config=SessionCompactionConfig(
+            active_window=4,
+            compaction_threshold=100,
+            max_summary_chars=300,
+            context_token_limit=80,
+            compaction_token_threshold_ratio=0.5,
+        )
+    )
+    state = SessionState.create(
+        "sess_token_threshold",
+        data={
+            "message_history": [
+                {
+                    "request_id": "r1",
+                    "role": "user",
+                    "content": "x" * 120,
+                    "timestamp": "t",
+                },
+                {
+                    "request_id": "r1",
+                    "role": "assistant",
+                    "content": "y" * 120,
+                    "timestamp": "t",
+                },
+                {
+                    "request_id": "r2",
+                    "role": "user",
+                    "content": "z" * 120,
+                    "timestamp": "t",
+                },
+                {
+                    "request_id": "r2",
+                    "role": "assistant",
+                    "content": "w" * 120,
+                    "timestamp": "t",
+                },
+                {
+                    "request_id": "r3",
+                    "role": "user",
+                    "content": "k" * 120,
+                    "timestamp": "t",
+                },
+                {
+                    "request_id": "r3",
+                    "role": "assistant",
+                    "content": "m" * 120,
+                    "timestamp": "t",
+                },
+            ]
+        },
+    )
+
+    plan = compactor.plan(state=state)
+
+    assert plan.should_compact is True
+    assert plan.messages_compactable == 2

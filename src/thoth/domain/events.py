@@ -14,6 +14,13 @@ class RuntimeEventType(StrEnum):
     REQUEST_RECEIVED = "request.received"
     SESSION_COMPACTION_STARTED = "session.compaction.started"
     SESSION_COMPACTED = "session.compacted"
+    MEMORY_CANDIDATE_CAPTURED = "memory.candidate.captured"
+    MEMORY_UPDATE_PERSISTED = "memory.update.persisted"
+    MEMORY_UPDATE_DISCARDED = "memory.update.discarded"
+    MEMORY_UPDATE_REVIEW_REQUIRED = "memory.update.review_required"
+    LEARNING_REVIEW_STARTED = "learning.review.started"
+    LEARNING_REVIEW_COMPLETED = "learning.review.completed"
+    LEARNING_REVIEW_FAILED = "learning.review.failed"
     RESPONSE_EMITTED = "response.emitted"
 
 

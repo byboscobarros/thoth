@@ -7,6 +7,7 @@ from typing import Any
 
 from thoth.core.context_builder import ProviderContextBuilder
 from thoth.core.event_bus import EventBus
+from thoth.core.memory_manager import MemoryManager
 from thoth.core.provider_selector import ProviderSelectionConfig, ProviderSelector
 from thoth.core.session_compactor import SessionCompactor
 from thoth.core.session_manager import SessionManager
@@ -37,6 +38,7 @@ class RuntimeOrchestrator:
         provider_selection: ProviderSelectionConfig | None = None,
         session_compactor: SessionCompactor | None = None,
         context_builder: ProviderContextBuilder | None = None,
+        memory_manager: MemoryManager | None = None,
     ) -> None:
         self._session_manager = session_manager
         self._event_bus = event_bus
@@ -44,6 +46,7 @@ class RuntimeOrchestrator:
         self._provider_selection = provider_selection or ProviderSelectionConfig()
         self._session_compactor = session_compactor or SessionCompactor()
         self._context_builder = context_builder or ProviderContextBuilder()
+        self._memory_manager = memory_manager or MemoryManager()
 
     def handle(self, envelope: RuntimeInputEnvelope) -> RuntimeOutputEnvelope:
         validate_input_envelope(envelope)
@@ -107,6 +110,25 @@ class RuntimeOrchestrator:
                 )
             )
 
+        memory_result = self._memory_manager.apply(
+            state=persisted_state,
+            request_id=envelope.request_id,
+            input_messages=envelope.input,
+            assistant_message=assistant_message,
+        )
+        if memory_result.state.revision != persisted_state.revision:
+            persisted_state = self._session_manager.persist(memory_result.state)
+
+        for item in memory_result.events:
+            self._event_bus.publish(
+                RuntimeEvent(
+                    type=item.type,
+                    request_id=envelope.request_id,
+                    session_id=persisted_state.session_id,
+                    payload=item.payload,
+                )
+            )
+
         audit_ref = f"session:{persisted_state.session_id}:rev:{persisted_state.revision}"
         if compaction_result.compacted:
             audit_ref = f"{audit_ref}:compacted:{compaction_result.compacted_messages}"
@@ -120,6 +142,7 @@ class RuntimeOrchestrator:
                     content=assistant_message,
                 )
             ],
+            memory_updates=memory_result.memory_updates,
             audit_ref=audit_ref,
         )
         validate_output_envelope(response)
@@ -150,6 +173,12 @@ class RuntimeOrchestrator:
             session_state=session_state,
             input_messages=envelope.input,
         )
+        learning_context = self._memory_manager.build_runtime_memory_context(state=session_state)
+        if learning_context:
+            provider_messages = [
+                RuntimeMessage(role=RuntimeMessageRole.SYSTEM, content=learning_context),
+                *provider_messages,
+            ]
         selected_provider = self._provider_selector.select(
             capability="chat_completion",
             config=self._provider_selection,

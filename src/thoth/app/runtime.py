@@ -10,8 +10,16 @@ from uuid import uuid4
 
 from thoth.core import (
     FileSessionStore,
+    HeuristicSessionSummarizer,
     InMemoryEventBus,
+    InMemoryLearningStore,
     InMemorySessionStore,
+    LearningReviewerConfig,
+    LLMSessionSummarizer,
+    LLMLearningReviewer,
+    FileLearningStore,
+    MemoryManager,
+    MemoryManagerConfig,
     ProviderContextBuilder,
     ProviderContextConfig,
     ProviderLoader,
@@ -22,6 +30,7 @@ from thoth.core import (
     SessionCompactionConfig,
     SessionCompactor,
     SessionManager,
+    SessionSummarizer,
 )
 from thoth.core.session_store import SessionStore
 from thoth.domain import (
@@ -80,6 +89,10 @@ def bootstrap_runtime() -> RuntimeApplication:
         active_window=_read_int_env("THOTH_SESSION_ACTIVE_WINDOW", 40),
         compaction_threshold=_read_int_env("THOTH_SESSION_COMPACTION_THRESHOLD", 20),
         max_summary_chars=_read_int_env("THOTH_SESSION_MAX_SUMMARY_CHARS", 1200),
+        context_token_limit=_read_optional_int_env("THOTH_SESSION_CONTEXT_TOKEN_LIMIT"),
+        compaction_token_threshold_ratio=_read_float_env(
+            "THOTH_SESSION_COMPACTION_TOKEN_THRESHOLD_RATIO", 0.50
+        ),
     )
     context_config = ProviderContextConfig(
         provider_context_limit=_read_int_env("THOTH_PROVIDER_CONTEXT_LIMIT", 40),
@@ -90,8 +103,24 @@ def bootstrap_runtime() -> RuntimeApplication:
         event_bus=event_bus,
         provider_selector=selector,
         provider_selection=selection_config,
-        session_compactor=SessionCompactor(config=compaction_config),
+        session_compactor=SessionCompactor(
+            config=compaction_config,
+            summarizer=_build_session_summarizer(selector),
+        ),
         context_builder=ProviderContextBuilder(config=context_config),
+        memory_manager=MemoryManager(
+            MemoryManagerConfig(
+                enabled=_read_bool_env("THOTH_MEMORY_ENABLED", False),
+                persist_threshold=_read_float_env("THOTH_MEMORY_PERSIST_THRESHOLD", 0.70),
+                review_threshold=_read_float_env("THOTH_MEMORY_REVIEW_THRESHOLD", 0.50),
+                max_updates=_read_int_env("THOTH_MEMORY_MAX_UPDATES", 200),
+                max_candidates=_read_int_env("THOTH_MEMORY_MAX_CANDIDATES", 10),
+                review_enabled=_read_bool_env("THOTH_LEARNING_REVIEW_ENABLED", False),
+                max_review_suggestions=_read_int_env("THOTH_LEARNING_REVIEW_MAX_SUGGESTIONS", 3),
+            ),
+            learning_store=_build_learning_store(),
+            reviewer=_build_learning_reviewer(selector),
+        ),
     )
     return RuntimeApplication(orchestrator=orchestrator)
 
@@ -108,6 +137,34 @@ def _default_providers_path() -> Path:
     return Path(__file__).resolve().parents[1] / "providers"
 
 
+def _build_learning_store() -> InMemoryLearningStore | FileLearningStore:
+    backend = os.getenv("THOTH_LEARNING_STORE", "file").strip().lower()
+    max_updates = _read_int_env("THOTH_LEARNING_STORE_MAX_UPDATES", 5000)
+    if backend == "inmemory":
+        return InMemoryLearningStore(max_updates=max_updates)
+
+    path = os.getenv("THOTH_LEARNING_STORE_PATH", ".thoth/learning/memory_updates.json")
+    return FileLearningStore(Path(path), max_updates=max_updates)
+
+
+def _build_learning_reviewer(provider_selector: ProviderSelector | None) -> LLMLearningReviewer | None:
+    if provider_selector is None:
+        return None
+
+    if not _read_bool_env("THOTH_LEARNING_REVIEW_ENABLED", False):
+        return None
+
+    preferred_provider, model = _resolve_learning_provider_and_model()
+    return LLMLearningReviewer(
+        provider_selector=provider_selector,
+        provider_selection=ProviderSelectionConfig(preferred_provider=preferred_provider),
+        model=model,
+        config=LearningReviewerConfig(
+            max_suggestions=_read_int_env("THOTH_LEARNING_REVIEW_MAX_SUGGESTIONS", 3)
+        ),
+    )
+
+
 def _read_int_env(env_name: str, default: int) -> int:
     raw_value = os.getenv(env_name, "").strip()
     if not raw_value:
@@ -120,6 +177,72 @@ def _read_int_env(env_name: str, default: int) -> int:
     if parsed <= 0:
         return default
     return parsed
+
+
+def _read_optional_int_env(env_name: str) -> int | None:
+    raw_value = os.getenv(env_name, "").strip()
+    if not raw_value:
+        return None
+
+    try:
+        parsed = int(raw_value)
+    except ValueError:
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def _read_float_env(env_name: str, default: float) -> float:
+    raw_value = os.getenv(env_name, "").strip()
+    if not raw_value:
+        return default
+
+    try:
+        parsed = float(raw_value)
+    except ValueError:
+        return default
+    if parsed <= 0:
+        return default
+    return parsed
+
+
+def _read_bool_env(env_name: str, default: bool) -> bool:
+    raw_value = os.getenv(env_name, "").strip().lower()
+    if not raw_value:
+        return default
+    if raw_value in {"1", "true", "yes", "on"}:
+        return True
+    if raw_value in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _build_session_summarizer(provider_selector: ProviderSelector | None) -> SessionSummarizer:
+    strategy = os.getenv("THOTH_SESSION_SUMMARIZER", "heuristic").strip().lower()
+    if strategy == "llm":
+        preferred_provider, model = _resolve_learning_provider_and_model()
+        provider_selection = ProviderSelectionConfig(preferred_provider=preferred_provider)
+        return LLMSessionSummarizer(
+            provider_selector=provider_selector,
+            provider_selection=provider_selection,
+            model=model,
+        )
+    return HeuristicSessionSummarizer()
+
+
+def _resolve_learning_provider_and_model() -> tuple[str | None, str | None]:
+    learning_provider = os.getenv("THOTH_LEARNING_PROVIDER", "").strip() or None
+    learning_model = os.getenv("THOTH_LEARNING_MODEL", "").strip() or None
+
+    legacy_provider = os.getenv("THOTH_SESSION_SUMMARIZER_PROVIDER", "").strip() or None
+    legacy_model = os.getenv("THOTH_SESSION_SUMMARIZER_MODEL", "").strip() or None
+
+    main_provider = os.getenv("THOTH_PREFERRED_PROVIDER", "").strip() or None
+
+    preferred_provider = learning_provider or legacy_provider or main_provider
+    model = learning_model or legacy_model
+    return preferred_provider, model
 
 
 def _load_dotenv() -> None:

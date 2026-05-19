@@ -31,6 +31,7 @@ from thoth.domain.providers import (
 )
 from thoth.domain.session_compaction import CompactionMeta, SessionSummary
 from thoth.domain.session import SessionState
+from thoth.domain.memory import LearningTriggerState, MemoryCandidate, MemoryDecision, MemoryScore, MemoryUpdate
 
 __all__ = [
     "EnvelopeValidationError",
@@ -53,6 +54,11 @@ __all__ = [
     "ProviderManifestValidationIssue",
     "ProviderRequest",
     "ProviderResponse",
+    "LearningTriggerState",
+    "MemoryCandidate",
+    "MemoryDecision",
+    "MemoryScore",
+    "MemoryUpdate",
     "CompactionMeta",
     "SessionSummary",
     "SessionState",
